@@ -1,14 +1,16 @@
-## eviction manager
+[TOC]
 
-### 目标
+# eviction manager
+
+## 目标
 
 本文档的主要目标是通过源码分析结合总结概述的方式试图让学习 kubernetes 的相关人员能对对 kubernetes 的 eviction manager 清晰、完整、深入的掌握.
 
-### 总览
+## 总览
 
 当 node 节点的可用计算资源过低时,需要一种机制来保证节点的稳定性,因此 eviction manager 应运而生. 通过 eviction manager 来实现 pod 驱逐,回收计算资源,以达到保证 node 节点的稳定性.
 
-#### eviction 触发的信号来源
+## eviction 触发的信号来源
 
 既然是驱逐管理器,那我们首先应该想到的是,触发驱逐 pod 的条件是什么? 都有那些驱逐的策略? 当前版本(v1.14.1)中,驱逐的策略有如下几种:
 
@@ -24,7 +26,7 @@
 
 通过上面的表格可用看出目前的驱逐策略只支持 memory、fs、pid 相关的.并未支持 cpu.
 
-#### eviction 触发的阈值设置
+## eviction 触发的阈值设置
 
 驱逐策略有了, 那接下来就是触发驱逐策略的条件(阈值)了, 所有的驱逐策略的触发条件的设置都是形如:
 
@@ -71,7 +73,7 @@
 --eviction-hard="": A set of eviction thresholds (e.g. memory.available<1Gi) that if met would trigger a pod eviction.
 ```
 
-### cgroup memory notifier
+## cgroup memory notifier
 
 目前 kubelet 获取的所有的时时阈值设置的资源类型都是通过 cadvisor 获取的, 如果开启这个参数, 则当内存使用超过设置的内存的驱逐阈值时,通过 linux kernel 的 cgroup 事件来通知 eviction manager 去做驱逐 pod 的操作.
 
@@ -111,7 +113,7 @@ Guaranteed 如果 pod 的资源使用超过了其请求值,则使用最多的将
 
 代码路径: `kubernetes/pkg/kubelet/eviction/api/types.go`
 
-```
+```go
 package api
 
 import (
@@ -172,7 +174,7 @@ type Threshold struct {
 
 代码路径: `kubernetes/pkg/kubelet/eviction/types.go`
 
-```
+```go
 // Manager evaluates when an eviction threshold for node stability has been met on the node.
 type Manager interface {
 	// Start starts the control loop to monitor eviction thresholds at specified interval.
@@ -188,18 +190,17 @@ type Manager interface {
 	IsUnderPIDPressure() bool
 }
 
-```
-
 - start 方法就是用来周期性的做资源收集, 比较,驱逐 pod,回收资源的操作的.
 - IsUnderMemoryPressure IsUnderDiskPressure IsUnderPIDPressure 这三个方法主要是 kubelet 的 node status manager 使用的. eviction manager 没有使用到.
+```
 
-通过 start 方法的三个参数,大体验证了我们之前的猜测, diskInfoProvider 收集资源, podFunc 筛选 pod, podCleanedUpFunc 清除 pod 回收资源, monitoringInterval 执行 eviction 的轮训周期.
+通过 start 方法的三个参数，大体验证了我们之前的猜测。 diskInfoProvider 收集资源， podFunc 筛选 pod, podCleanedUpFunc 确认 pod 资源回收是否完成, monitoringInterval 执行 eviction 的轮训周期.
 
 #### manager 实现
 
 代码路径: `kubernetes/pkg/kubelet/eviction/eviction_manager.go`
 
-```
+```go
 // managerImpl implements Manager
 type managerImpl struct {
 	//  used to track time
@@ -276,7 +277,7 @@ func NewManager(
 
 相关的参数就不在叙述了,有对应的注释.
 
-既然是源码讲解,那我个人觉得就是要将对应的结构体的初始化的各个数据来源都讲清楚, 然后才是代码功能逻辑处理的代码分析. 既然要讲清楚 eviction manager 接口实现的各个 struct filed 的来源,哪肯定我们得知道是谁,在什么地方需要使用他? 肯定是需要使用他的地方去初始化各种 filed. 初始化使用的代码在
+既然是源码讲解，那我个人觉得就是要将对应的结构体的初始化的各个数据来源都讲清楚，然后才是代码功能逻辑处理的代码分析， 既然要讲清楚 eviction manager 接口实现的各个 struct filed 的来源,哪肯定我们得知道是谁,在什么地方需要使用他？肯定是需要使用他的地方去初始化各种 filed。
 
 初始化
 
@@ -579,7 +580,7 @@ func (m *managerImpl) Start(diskInfoProvider DiskInfoProvider, podFunc ActivePod
 代码处理逻辑: 首先是初始化一个 thresholdHandler 方法,用来处理驱逐 pod.用来初始化 cgroup 的 MemoryThresholdNotifier, 然后根据参数去判断是否使用了 cgroup memory notifier 通过上文中提到的 cgroup memory 参数,新建一个 cgroup 的 MemoryThresholdNotifier 加入到 eviction manager 中的通知器中.
 最后通过 monitoringInterval 这个驱逐器执行的周期时间来周期性的执行 synchronize 这个同步驱逐的方法. 真正处理驱逐逻辑判断的方法是 synchronize 方法,然后我们来详细的分析这个方法的代码.
 
-###### synchronize
+#### synchronize
 
 ```
 func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, podFunc ActivePodsFunc) []*v1.Pod {
@@ -1096,12 +1097,14 @@ func (m *managerImpl) reclaimNodeLevelResources(signalToReclaim evictionapi.Sign
 }
 ```
 
-然后获取第 0 个策略,通过查看对应的排序方法得知第 0 个是 node 级别的资源,然后回收 node 级别的资源.
+thresholds 排序规则: allocatableMemory.available,memory.available,nodefs.available,nodefs.inodesFree,imagefs.available,imagefs.inodesFree,pid.available
+
+然后获取第 0 个策略, 进行 node 级别的资源回收(只有这两个 nodefs.available,nodefs.inodesFree),如果没有 node 级别的资源回收就返回, 也就是说当我们同时设置了 allocatableMemory.available,memory.available,nodefs.available,nodefs.inodesFree,imagefs.available,imagefs.inodesFree,pid.available 其中的一个或者多个的时候, 如果其中有多个值达到阈值, 则每次回收只回收一种策略的(级别最高的那中策略),而且可能最高的那个策略就是 node 级别的策略,那这样的话,我们就可以不用驱逐 pod 就可以降低 node 策略资源的压力.
 
 最后处理回收 pod 级别的资源
 
-```
-// rank the pods for eviction
+```go
+	// rank the pods for eviction
 	rank, ok := m.signalToRankFunc[thresholdToReclaim.Signal]
 	if !ok {
 		klog.Errorf("eviction manager: no ranking function for signal %s", thresholdToReclaim.Signal)
@@ -1149,7 +1152,7 @@ func (m *managerImpl) reclaimNodeLevelResources(signalToReclaim evictionapi.Sign
 	return nil
 ```
 
-然后设置优雅回收时间,之后调用 evictPod 方法驱逐 pod.
+然后设置优雅回收时间,之后调用 evictPod 方法驱逐 pod。请注意 activePods 的 for 循环如果第一个 pod 驱逐成功，直接返回驱逐的 pod 信息，如果不成功，则选择下一个 pod 进行驱逐，也就是说，每个驱逐周期内，只会驱逐一个 pod。
 
 ```
 
@@ -1189,4 +1192,322 @@ func (m *managerImpl) evictPod(pod *v1.Pod, gracePeriodOverride int64, evictMsg 
 }
 ```
 
-mirro pod 的处理,然后是调用 killPodFunc 杀死 pod 从而达到驱逐的目的
+mirro pod 的处理，然后是调用 killPodFunc 杀死 pod 从而达到驱逐的目的。
+
+## 核心代码
+
+整体的代码流程我们分析完了，那接下来我们看看其中比较核心的几个 rank 方法。分两类，一类是 threthos 用到的，一类是 pod 用到的。
+
+### Threshold Rank
+
+```go
+// byEvictionPriority implements sort.Interface for []v1.ResourceName.
+type byEvictionPriority []evictionapi.Threshold
+
+func (a byEvictionPriority) Len() int { return len(a) }
+func (a byEvictionPriority) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+
+// Less ranks memory before all other resources, and ranks thresholds with no resource to reclaim last
+func (a byEvictionPriority) Less(i, j int) bool {
+\_, jSignalHasResource := signalToResource[a[j].Signal]
+return a[i].Signal == evictionapi.SignalMemoryAvailable || a[i].Signal == evictionapi.SignalAllocatableMemoryAvailable || !jSignalHasResource
+}
+```
+
+byEvictionPriority 这是一个 evictionapi.Threshold 的数组，它实现了 golang 的 sort 包中的 Interface 接口，也就是排序的接口。核心逻辑就在 Less 方法中，也非常简单。当所有的策略都设置的时候排序的结果如下：allocatableMemory.available，memory.available，nodefs.available，nodefs.inodesFree，imagefs.available，imagefs.inodesFree，pid.available
+
+### Pod Rank
+
+上文我们分析过了，eviction manager 的 signalToRankFunc 是通过 buildSignalToRankFunc 这个方法创建，那我们先来看看这个方法
+
+```go
+// buildSignalToRankFunc returns ranking functions associated with resources
+func buildSignalToRankFunc(withImageFs bool) map[evictionapi.Signal]rankFunc {
+	signalToRankFunc := map[evictionapi.Signal]rankFunc{
+		evictionapi.SignalMemoryAvailable:            rankMemoryPressure,
+		evictionapi.SignalAllocatableMemoryAvailable: rankMemoryPressure,
+		evictionapi.SignalPIDAvailable:               rankPIDPressure,
+	}
+	// usage of an imagefs is optional
+	if withImageFs {
+		// with an imagefs, nodefs pod rank func for eviction only includes logs and local volumes
+		signalToRankFunc[evictionapi.SignalNodeFsAvailable] = rankDiskPressureFunc([]fsStatsType{fsStatsLogs, fsStatsLocalVolumeSource}, v1.ResourceEphemeralStorage)
+		signalToRankFunc[evictionapi.SignalNodeFsInodesFree] = rankDiskPressureFunc([]fsStatsType{fsStatsLogs, fsStatsLocalVolumeSource}, resourceInodes)
+		// with an imagefs, imagefs pod rank func for eviction only includes rootfs
+		signalToRankFunc[evictionapi.SignalImageFsAvailable] = rankDiskPressureFunc([]fsStatsType{fsStatsRoot}, v1.ResourceEphemeralStorage)
+		signalToRankFunc[evictionapi.SignalImageFsInodesFree] = rankDiskPressureFunc([]fsStatsType{fsStatsRoot}, resourceInodes)
+	} else {
+		// without an imagefs, nodefs pod rank func for eviction looks at all fs stats.
+		// since imagefs and nodefs share a common device, they share common ranking functions.
+		signalToRankFunc[evictionapi.SignalNodeFsAvailable] = rankDiskPressureFunc([]fsStatsType{fsStatsRoot, fsStatsLogs, fsStatsLocalVolumeSource}, v1.ResourceEphemeralStorage)
+		signalToRankFunc[evictionapi.SignalNodeFsInodesFree] = rankDiskPressureFunc([]fsStatsType{fsStatsRoot, fsStatsLogs, fsStatsLocalVolumeSource}, resourceInodes)
+		signalToRankFunc[evictionapi.SignalImageFsAvailable] = rankDiskPressureFunc([]fsStatsType{fsStatsRoot, fsStatsLogs, fsStatsLocalVolumeSource}, v1.ResourceEphemeralStorage)
+		signalToRankFunc[evictionapi.SignalImageFsInodesFree] = rankDiskPressureFunc([]fsStatsType{fsStatsRoot, fsStatsLogs, fsStatsLocalVolumeSource}, resourceInodes)
+	}
+	return signalToRankFunc
+}
+```
+
+这个方法中包含来每一种策略对应的 rank 方法的实现指定。接下来我们分析下具体的每种实现
+
+```go
+// rankMemoryPressure orders the input pods for eviction in response to memory pressure.
+// It ranks by whether or not the pod's usage exceeds its requests, then by priority, and
+// finally by memory usage above requests.
+func rankMemoryPressure(pods []*v1.Pod, stats statsFunc) {
+	orderedBy(exceedMemoryRequests(stats), priority, memory(stats)).Sort(pods)
+}
+
+// rankPIDPressure orders the input pods by priority in response to PID pressure.
+func rankPIDPressure(pods []*v1.Pod, stats statsFunc) {
+	orderedBy(priority).Sort(pods)
+}
+
+// rankDiskPressureFunc returns a rankFunc that measures the specified fs stats.
+func rankDiskPressureFunc(fsStatsToMeasure []fsStatsType, diskResource v1.ResourceName) rankFunc {
+	return func(pods []*v1.Pod, stats statsFunc) {
+		orderedBy(exceedDiskRequests(stats, fsStatsToMeasure, diskResource), priority, disk(stats, fsStatsToMeasure, diskResource)).Sort(pods)
+	}
+}
+```
+
+在具体分析三个方法前我们先看看如下这段代码，因为这以上三个方法都是基于如下这段代码中的实现写的
+
+```go
+type cmpFunc func(p1, p2 *v1.Pod) int
+
+// multiSorter implements the Sort interface, sorting changes within.
+type multiSorter struct {
+	pods []*v1.Pod
+	cmp  []cmpFunc
+}
+
+// Sort sorts the argument slice according to the less functions passed to OrderedBy.
+func (ms *multiSorter) Sort(pods []*v1.Pod) {
+	ms.pods = pods
+	sort.Sort(ms)
+}
+
+// OrderedBy returns a Sorter that sorts using the cmp functions, in order.
+// Call its Sort method to sort the data.
+func orderedBy(cmp ...cmpFunc) *multiSorter {
+	return &multiSorter{
+		cmp: cmp,
+	}
+}
+
+// Len is part of sort.Interface.
+func (ms *multiSorter) Len() int {
+	return len(ms.pods)
+}
+
+// Swap is part of sort.Interface.
+func (ms *multiSorter) Swap(i, j int) {
+	ms.pods[i], ms.pods[j] = ms.pods[j], ms.pods[i]
+}
+
+// Less is part of sort.Interface.
+func (ms *multiSorter) Less(i, j int) bool {
+	p1, p2 := ms.pods[i], ms.pods[j]
+	var k int
+	for k = 0; k < len(ms.cmp)-1; k++ {
+		cmpResult := ms.cmp[k](p1, p2)
+		// p1 is less than p2
+		if cmpResult < 0 {
+			return true
+		}
+		// p1 is greater than p2
+		if cmpResult > 0 {
+			return false
+		}
+		// we don't know yet
+	}
+	// the last cmp func is the final decider
+	return ms.cmp[k](p1, p2) < 0
+}
+```
+
+multiSorter 有两个 field，一个是 pods 数组，需要排序的数组，一个 cmpFunc 数组，就是比较两个 pod 大小的方法。multiSorter 实现了 sort.Interface 接口从而实现了 pod 排序。而在排序中，Less 方法是核心，逻辑如下：将 multiSorter 中的比较方法挨个执行，获取 a，b 差值，如果相等，继续执行下一个，如果不相等，返回比较结过，如果前面的 n-1 个 cmpFunc 多执行完了，a,b 还是相等，那就执行最后一个 cmpFunc。
+
+然后我们来看看 地段代码中用到的 cmpFunc 有如下几个：exceedMemoryRequests，priority，memory，disk，exceedDiskRequests
+
+rankMemoryPressure 用到 exceedMemoryRequests，priority，memory
+
+rankPIDPressure 用到 priority
+
+rankDiskPressureFunc 用到 exceedDiskRequests，priority，disk
+
+接下来我们来具体分析每一个 cmpFunc
+
+#### cmpFunc 分析
+
+##### exceedMemoryRequests
+
+```go
+// exceedMemoryRequests compares whether or not pods' memory usage exceeds their requests
+func exceedMemoryRequests(stats statsFunc) cmpFunc {
+	return func(p1, p2 *v1.Pod) int {
+		p1Stats, p1Found := stats(p1)
+		p2Stats, p2Found := stats(p2)
+		if !p1Found || !p2Found {
+			// prioritize evicting the pod for which no stats were found
+			return cmpBool(!p1Found, !p2Found)
+		}
+
+		p1Memory := memoryUsage(p1Stats.Memory)
+		p2Memory := memoryUsage(p2Stats.Memory)
+		p1ExceedsRequests := p1Memory.Cmp(podRequest(p1, v1.ResourceMemory)) == 1
+		p2ExceedsRequests := p2Memory.Cmp(podRequest(p2, v1.ResourceMemory)) == 1
+		// prioritize evicting the pod which exceeds its requests
+		return cmpBool(p1ExceedsRequests, p2ExceedsRequests)
+	}
+}
+```
+
+该方法也相对简单， 就是分别获取两个 pod 的当前内存使用值（细看会发现这个使用值是内存的 workset 值，什么是 workset 值呢，相关字段的注释：// The amount of working set memory. This includes recently accessed memory,
+// dirty memory, and kernel memory. WorkingSetBytes is <= UsageBytes 我自己的理解翻译应该是当前时间，pod 所使用的内存，包活垃圾内存，内核内存），然后分别比较使用值和对应 pod 的 request 值的大小，判断是否前使用内存超过了 request 内存值，然后返回是否两个 pod 都超过了 request 内存值。
+
+##### priority
+
+```go
+// priority compares pods by Priority, if priority is enabled.
+func priority(p1, p2 *v1.Pod) int {
+	if !utilfeature.DefaultFeatureGate.Enabled(features.PodPriority) {
+		// If priority is not enabled, all pods are equal.
+		return 0
+	}
+	priority1 := schedulerutils.GetPodPriority(p1)
+	priority2 := schedulerutils.GetPodPriority(p2)
+	if priority1 == priority2 {
+		return 0
+	}
+	if priority1 > priority2 {
+		return 1
+	}
+	return -1
+}
+```
+
+priority 如果开启了 pod 优先级功能，则比较两个 pod 的优先级（pod.Spec.Priority，该值不能用户手动设置，只有当 pod 设置了 PriorityClassName 时，k8s 系统组件自己通过获取对应的 PriorityClass 设置的对应的优先级的值来设置该字段的值），优先级越高的越不容易被驱逐，优先级越低的越容器被驱逐。
+
+##### memory
+
+```go
+// memory compares pods by largest consumer of memory relative to request.
+func memory(stats statsFunc) cmpFunc {
+	return func(p1, p2 *v1.Pod) int {
+		p1Stats, p1Found := stats(p1)
+		p2Stats, p2Found := stats(p2)
+		if !p1Found || !p2Found {
+			// prioritize evicting the pod for which no stats were found
+			return cmpBool(!p1Found, !p2Found)
+		}
+
+		// adjust p1, p2 usage relative to the request (if any)
+		p1Memory := memoryUsage(p1Stats.Memory)
+		p1Request := podRequest(p1, v1.ResourceMemory)
+		p1Memory.Sub(p1Request)
+
+		p2Memory := memoryUsage(p2Stats.Memory)
+		p2Request := podRequest(p2, v1.ResourceMemory)
+		p2Memory.Sub(p2Request)
+
+		// prioritize evicting the pod which has the larger consumption of memory
+		return p2Memory.Cmp(*p1Memory)
+	}
+}
+```
+
+该方法实现的逻辑也比较简单，就是判断 pod1 和 pod2 谁的 memoryUsage-memoryRequest 的差值谁大谁小。
+
+##### disk
+
+```go
+// disk compares pods by largest consumer of disk relative to request for the specified disk resource.
+func disk(stats statsFunc, fsStatsToMeasure []fsStatsType, diskResource v1.ResourceName) cmpFunc {
+	return func(p1, p2 *v1.Pod) int {
+		p1Stats, p1Found := stats(p1)
+		p2Stats, p2Found := stats(p2)
+		if !p1Found || !p2Found {
+			// prioritize evicting the pod for which no stats were found
+			return cmpBool(!p1Found, !p2Found)
+		}
+		p1Usage, p1Err := podDiskUsage(p1Stats, p1, fsStatsToMeasure)
+		p2Usage, p2Err := podDiskUsage(p2Stats, p2, fsStatsToMeasure)
+		if p1Err != nil || p2Err != nil {
+			// prioritize evicting the pod which had an error getting stats
+			return cmpBool(p1Err != nil, p2Err != nil)
+		}
+
+		// adjust p1, p2 usage relative to the request (if any)
+		p1Disk := p1Usage[diskResource]
+		p2Disk := p2Usage[diskResource]
+		p1Request := podRequest(p1, v1.ResourceEphemeralStorage)
+		p1Disk.Sub(p1Request)
+		p2Request := podRequest(p2, v1.ResourceEphemeralStorage)
+		p2Disk.Sub(p2Request)
+		// prioritize evicting the pod which has the larger consumption of disk
+		return p2Disk.Cmp(p1Disk)
+	}
+}
+
+// podDiskUsage aggregates pod disk usage and inode consumption for the specified stats to measure.
+func podDiskUsage(podStats statsapi.PodStats, pod *v1.Pod, statsToMeasure []fsStatsType) (v1.ResourceList, error) {
+	disk := resource.Quantity{Format: resource.BinarySI}
+	inodes := resource.Quantity{Format: resource.DecimalSI}
+
+	containerUsageList := containerUsage(podStats, statsToMeasure)
+	disk.Add(containerUsageList[v1.ResourceEphemeralStorage])
+	inodes.Add(containerUsageList[resourceInodes])
+
+	if hasFsStatsType(statsToMeasure, fsStatsLocalVolumeSource) {
+		volumeNames := localVolumeNames(pod)
+		podLocalVolumeUsageList := podLocalVolumeUsage(volumeNames, podStats)
+		disk.Add(podLocalVolumeUsageList[v1.ResourceEphemeralStorage])
+		inodes.Add(podLocalVolumeUsageList[resourceInodes])
+	}
+	return v1.ResourceList{
+		v1.ResourceEphemeralStorage: disk,
+		resourceInodes:              inodes,
+	}, nil
+}
+```
+
+该方法是比较 pod1 pod2 请求值减使用值（包括 pod 使用的 localvolume，包括 绑定 emptydir configmap secret，hostpath 所产生的文件 以及日志文件）的大小
+
+##### exceedDiskRequests
+
+```go
+// exceedDiskRequests compares whether or not pods' disk usage exceeds their requests
+func exceedDiskRequests(stats statsFunc, fsStatsToMeasure []fsStatsType, diskResource v1.ResourceName) cmpFunc {
+	return func(p1, p2 *v1.Pod) int {
+		p1Stats, p1Found := stats(p1)
+		p2Stats, p2Found := stats(p2)
+		if !p1Found || !p2Found {
+			// prioritize evicting the pod for which no stats were found
+			return cmpBool(!p1Found, !p2Found)
+		}
+
+		p1Usage, p1Err := podDiskUsage(p1Stats, p1, fsStatsToMeasure)
+		p2Usage, p2Err := podDiskUsage(p2Stats, p2, fsStatsToMeasure)
+		if p1Err != nil || p2Err != nil {
+			// prioritize evicting the pod which had an error getting stats
+			return cmpBool(p1Err != nil, p2Err != nil)
+		}
+
+		p1Disk := p1Usage[diskResource]
+		p2Disk := p2Usage[diskResource]
+		p1ExceedsRequests := p1Disk.Cmp(podRequest(p1, diskResource)) == 1
+		p2ExceedsRequests := p2Disk.Cmp(podRequest(p2, diskResource)) == 1
+		// prioritize evicting the pod which exceeds its requests
+		return cmpBool(p1ExceedsRequests, p2ExceedsRequests)
+	}
+}
+```
+
+该方法通过判断 pod1 pod2 使用的磁盘值是否超过请求值
+
+综合上述的方法分析，那我们可以做如下的总结：
+排序 pod，最终更 pod 的 Priority，是否超过 request，内存使用与 request 差值有关。
+
+优先级最低，内存差值（usage-requst）越大，越先被驱逐。通过分析
