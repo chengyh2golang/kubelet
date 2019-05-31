@@ -283,7 +283,7 @@ func NewManager(
 
 代码路径: `kuberenetes/pkg/kubelet/kubelet.go 825`
 
-```
+```go
 func NewMainKubelet(...)  (*Kubelet, error)  {
 	------
 	evictionManager, evictionAdmitHandler := eviction.NewManager(klet.resourceAnalyzer, evictionConfig, killPodNow(klet.podWorkers, kubeDeps.Recorder), klet.podManager.GetMirrorPodByPod, klet.imageManager, klet.containerGC, kubeDeps.Recorder, nodeRef, klet.clock)
@@ -310,6 +310,7 @@ func NewMainKubelet(...)  (*Kubelet, error)  {
 
 1. klet.resourceAnalyzer 分析
 
+```go
 // ResourceAnalyzer provides statistics on node resource consumption
 type ResourceAnalyzer interface {
 Start()
@@ -325,12 +326,13 @@ SummaryProvider 主要是 kubelet 自己暴露的关于 node 和 pod 的 cpu 内
 }
 
 klet.resourceAnalyzer = serverstats.NewResourceAnalyzer(klet, kubeCfg.VolumeStatsAggPeriod.Duration)
+```
 
 2. config 就不在细说了 就是通过 flag 参数初始化到 kubelet 的 config,然后从 kubelet 的 config 获取对应策略健值对.
 
 3. KillPodFunc
 
-```
+```go
 func killPodNow(podWorkers PodWorkers, recorder record.EventRecorder) eviction.KillPodFunc {
 	return func(pod *v1.Pod, status v1.PodStatus, gracePeriodOverride *int64) error {
 
@@ -396,12 +398,14 @@ recorder 主要用来产生事件
 
 代码路径: k8s.io/kubernetes/pkg/kubelet/pod/pod_manager.go 373
 
+```go
 func (pm *basicManager) GetMirrorPodByPod(pod *v1.Pod) (\*v1.Pod, bool) {
 pm.lock.RLock()
 defer pm.lock.RUnlock()
 mirrorPod, ok := pm.mirrorPodByFullName[kubecontainer.GetPodFullName(pod)]
 return mirrorPod, ok
 }
+```
 
 这里我就不在说 basicManager 的实现, GetMirrorPodByPod 主要是获取 mirropod, 我简单的说下什么是 mirro pod.
 
@@ -417,10 +421,12 @@ return mirrorPod, ok
 
 代码路径: `kuberenetes/pkg/kubelet/kubelet.go 1340`
 
+```go
 func (kl \*Kubelet) initializeRuntimeDependentModules() {
 kl.evictionManager.Start(kl.StatsProvider, kl.GetActivePods, kl.podResourcesAreReclaimed, evictionMonitoringPeriod)
 
 }
+```
 
 启动的时候传入了三个核心参数, evictionManager 的 start 方法需要三个参数.
 
@@ -434,7 +440,7 @@ kl.evictionManager.Start(kl.StatsProvider, kl.GetActivePods, kl.podResourcesAreR
 
 代码路径: kubernetes/pkg/kubelet/stats/stats_provider.go 203
 
-```
+```go
    // 是否存在专用的镜像文件系统
    func (p *StatsProvider) HasDedicatedImageFs() (bool, error) {
    device, err := p.containerStatsProvider.ImageFsDevice()
@@ -453,7 +459,7 @@ kl.evictionManager.Start(kl.StatsProvider, kl.GetActivePods, kl.podResourcesAreR
 
 代码路径: kubernetes/pkg/kubelete/kubelet_pods.go
 
-```
+```go
 // GetActivePods returns non-terminal pods
 func (kl *Kubelet) GetActivePods() []*v1.Pod {
 allPods := kl.podManager.GetPods()
@@ -493,7 +499,7 @@ return status.Phase == v1.PodFailed || status.Phase == v1.PodSucceeded || (pod.D
 
 代码路径: `kubernetes/pkg/kubelete/kubelet_pods.go 936`
 
-```
+```go
 func (kl *Kubelet) podResourcesAreReclaimed(pod *v1.Pod) bool {
 	status, ok := kl.statusManager.GetPodStatus(pod.UID)
 	if !ok {
@@ -543,7 +549,7 @@ func (kl *Kubelet) PodResourcesAreReclaimed(pod *v1.Pod, status v1.PodStatus) bo
 
 #### Start
 
-```
+```go
 // Start starts the control loop to observe and response to low compute resources.
 func (m *managerImpl) Start(diskInfoProvider DiskInfoProvider, podFunc ActivePodsFunc, podCleanedUpFunc PodCleanedUpFunc, monitoringInterval time.Duration) {
 	thresholdHandler := func(message string) {
@@ -582,7 +588,7 @@ func (m *managerImpl) Start(diskInfoProvider DiskInfoProvider, podFunc ActivePod
 
 #### synchronize
 
-```
+```go
 func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, podFunc ActivePodsFunc) []*v1.Pod {
 	// if we have nothing to do, just return
 	thresholds := m.config.Thresholds
@@ -754,7 +760,7 @@ func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, podFunc Act
 
 1.
 
-```
+```go
 	thresholds := m.config.Thresholds
 	if len(thresholds) == 0 && !utilfeature.DefaultFeatureGate.Enabled(features.LocalStorageCapacityIsolation) {
 		return nil
@@ -765,7 +771,7 @@ func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, podFunc Act
 
 2.
 
-```
+```go
 	if m.dedicatedImageFs == nil {
 		hasImageFs, ok := diskInfoProvider.HasDedicatedImageFs()
 		if ok != nil {
@@ -780,7 +786,7 @@ func (m *managerImpl) synchronize(diskInfoProvider DiskInfoProvider, podFunc Act
 
 接着是通过判断来设置 manager 是否使用专用的 imagefs, 设置 signalToRankFunc,signalToNodeReclaimFuncs, 我们看看这两个方法到底是干嘛的.
 
-```
+```go
 signalToRankFunc map[evictionapi.Signal]rankFunc 表一中的每种策略对应一个rankFunc,这个方法就是用来给满足驱逐的pod做评分排序的.
 
 // rankFunc sorts the pods in eviction order
@@ -790,7 +796,7 @@ type rankFunc func(pods []*v1.Pod, stats statsFunc)
 
 m.signalToRankFunc 的具体方法是 执行 buildSignalToRankFunc(hasImageFs)
 
-```
+```go
 // buildSignalToRankFunc returns ranking functions associated with resources
 func buildSignalToRankFunc(withImageFs bool) map[evictionapi.Signal]rankFunc {
 	signalToRankFunc := map[evictionapi.Signal]rankFunc{
@@ -830,7 +836,7 @@ signalToNodeReclaimFuncs 的具体方法是 执行 buildSignalToNodeReclaimFuncs
 
 buildSignalToNodeReclaimFuncs
 
-```
+```go
 // buildSignalToNodeReclaimFuncs returns reclaim functions associated with resources.
 func buildSignalToNodeReclaimFuncs(imageGC ImageGC, containerGC ContainerGC, withImageFs bool) map[evictionapi.Signal]nodeReclaimFuncs {
 	signalToReclaimFunc := map[evictionapi.Signal]nodeReclaimFuncs{}
@@ -858,7 +864,7 @@ func buildSignalToNodeReclaimFuncs(imageGC ImageGC, containerGC ContainerGC, wit
 
 到此为止 eviction manager 所有需要的资源都已经准备就绪,接下来就是逻辑处理了.
 
-```
+```go
 	activePods := podFunc()
 	updateStats := true
 	summary, err := m.summaryProvider.Get(updateStats)
@@ -870,7 +876,7 @@ func buildSignalToNodeReclaimFuncs(imageGC ImageGC, containerGC ContainerGC, wit
 
 获取 running 的 pod,取得获取指标资源的 client(summary),等会儿后面用到这个 client 去获取资源的使用情况.
 
-```
+```go
 if m.clock.Since(m.thresholdsLastUpdated) > notifierRefreshInterval {
 		m.thresholdsLastUpdated = m.clock.Now()
 		for _, notifier := range m.thresholdNotifiers {
@@ -883,7 +889,7 @@ if m.clock.Since(m.thresholdsLastUpdated) > notifierRefreshInterval {
 
 如果上次运行 eviction manager 的所有事件(主要是资源超过设置的阈值事件)通知器的事件超过了通知器的通知周期,则运行所有的事通知器. 其实这里就一个事件通知器,就是当开启了 cgroup memory notifier 的时候创建的, 结合上面的**Start**方法的代码和如下代码:
 
-```
+```go
 func (m *memoryThresholdNotifier) Start() {
 	klog.Infof("eviction manager: created %s", m.Description())
 	for range m.events {
@@ -928,7 +934,7 @@ func (m *memoryThresholdNotifier) UpdateThreshold(summary *statsapi.Summary) err
 
 UpdateThreshold 方法最终调用 m.notifier.Start(m.events) 方法,m.notifier.Start 方法中 m.handler(fmt.Sprintf("eviction manager: %s crossed", m.Description()))这个 m.handler 就是
 
-```
+```go
 	thresholdHandler := func(message string) {
 		klog.Infof(message)
 		m.synchronize(diskInfoProvider, podFunc)
@@ -938,7 +944,7 @@ UpdateThreshold 方法最终调用 m.notifier.Start(m.events) 方法,m.notifier.
 
 所以事件通知器最终还是调用 synchronize 方法去做驱逐处理,上面也说了,这个就是 eviction manager 真正做驱逐操作的核心方法.
 
-```
+```go
 	observations, statsFunc := makeSignalObservations(summary)
 	debugLogObservations("observations", observations)
 ```
@@ -947,7 +953,7 @@ UpdateThreshold 方法最终调用 m.notifier.Start(m.events) 方法,m.notifier.
 
 running pod 获取到了, 时时的资源值也获取到了, 接下来就是比较对应的值和设置策略阈值是否达到
 
-```
+```go
 	thresholds = thresholdsMet(thresholds, observations, false)
 	debugLogThresholdsWithObservation("thresholds - ignoring grace period", thresholds, observations)
 
@@ -959,7 +965,7 @@ running pod 获取到了, 时时的资源值也获取到了, 接下来就是比�
 	debugLogThresholdsWithObservation("thresholds - reclaim not satisfied", thresholds, observations)
 ```
 
-```
+```go
 // thresholdsMet returns the set of thresholds that were met independent of grace period
 func thresholdsMet(thresholds []evictionapi.Threshold, observations signalObservations, enforceMinReclaim bool) []evictionapi.Threshold {
 	results := []evictionapi.Threshold{}
@@ -992,7 +998,7 @@ func thresholdsMet(thresholds []evictionapi.Threshold, observations signalObserv
 
 该方法具体通过获取时时的可用资源值和参数设置的阈值进比较,获取差值,如果大于设置的阈值,则返回需要驱逐的策略.
 
-```
+```go
 // track when a threshold was first observed
 	now := m.clock.Now()
 	thresholdsFirstObservedAt := thresholdsFirstObservedAt(thresholds, m.thresholdsFirstObservedAt, now)
@@ -1002,7 +1008,7 @@ func thresholdsMet(thresholds []evictionapi.Threshold, observations signalObserv
 
 获取观察到的 node 状态
 
-```
+```go
 nodeConditions := nodeConditions(thresholds)
 	if len(nodeConditions) > 0 {
 		klog.V(3).Infof("eviction manager: node conditions - observed: %v", nodeConditions)
@@ -1020,7 +1026,7 @@ nodeConditions := nodeConditions(thresholds)
 
 然后记给所有的到达阈值的策略设置上优雅回收时间并且跟新 eviction manager 的 node 状态,策略阈值,首次获取 node 状态和资源使用的时间.
 
-```
+```go
 thresholds = thresholdsMetGracePeriod(thresholdsFirstObservedAt, now)
 	debugLogThresholdsWithObservation("thresholds - grace periods satisified", thresholds, observations)
 
@@ -1041,7 +1047,7 @@ thresholds = thresholdsMetGracePeriod(thresholdsFirstObservedAt, now)
 
 排序达到阈值的策略
 
-```
+```go
 sort.Sort(byEvictionPriority(thresholds))
 	thresholdToReclaim := thresholds[0]
 	resourceToReclaim, found := signalToResource[thresholdToReclaim.Signal]
@@ -1063,7 +1069,7 @@ sort.Sort(byEvictionPriority(thresholds))
 
 ```
 
-```
+```go
 // reclaimNodeLevelResources attempts to reclaim node level resources.  returns true if thresholds were satisfied and no pod eviction is required.
 func (m *managerImpl) reclaimNodeLevelResources(signalToReclaim evictionapi.Signal, resourceToReclaim v1.ResourceName) bool {
 	nodeReclaimFuncs := m.signalToNodeReclaimFuncs[signalToReclaim]
@@ -1135,7 +1141,7 @@ thresholds 排序规则: allocatableMemory.available,memory.available,nodefs.ava
 
 首先获取对应策略的排序方法来排序需要回收的 pod.
 
-```
+```go
 	// we kill at most a single pod during each eviction interval
 	for i := range activePods {
 		pod := activePods[i]
@@ -1154,7 +1160,7 @@ thresholds 排序规则: allocatableMemory.available,memory.available,nodefs.ava
 
 然后设置优雅回收时间,之后调用 evictPod 方法驱逐 pod。请注意 activePods 的 for 循环如果第一个 pod 驱逐成功，直接返回驱逐的 pod 信息，如果不成功，则选择下一个 pod 进行驱逐，也就是说，每个驱逐周期内，只会驱逐一个 pod。
 
-```
+```go
 
 func (m *managerImpl) evictPod(pod *v1.Pod, gracePeriodOverride int64, evictMsg string, annotations map[string]string) bool {
 	// If the pod is marked as critical and static, and support for critical pod annotations is enabled,
@@ -1508,6 +1514,5 @@ func exceedDiskRequests(stats statsFunc, fsStatsToMeasure []fsStatsType, diskRes
 该方法通过判断 pod1 pod2 使用的磁盘值是否超过请求值
 
 综合上述的方法分析，那我们可以做如下的总结：
-排序 pod，最终更 pod 的 Priority，是否超过 request，内存使用与 request 差值有关。
 
-优先级最低，内存差值（usage-requst）越大，越先被驱逐。通过分析
+排序 pod，最终更 pod 的 Priority，是否超过 request，内存使用与 request 差值有关。优先级最低，内存差值（usage-requst）越大，越先被驱逐。
